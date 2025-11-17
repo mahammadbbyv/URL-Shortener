@@ -9,11 +9,14 @@ namespace UrlShortener.API.Services;
 public class UrlService : IUrlService
 {
     private readonly AppDbContext _context;
+    private readonly ICacheService _cache;
     private readonly ILogger<UrlService> _logger;
+    private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(30);
 
-    public UrlService(AppDbContext context, ILogger<UrlService> logger)
+    public UrlService(AppDbContext context, ICacheService cache, ILogger<UrlService> logger)
     {
         _context = context;
+        _cache = cache;
         _logger = logger;
     }
 
@@ -50,6 +53,8 @@ public class UrlService : IUrlService
         _context.ShortUrls.Add(shortUrl);
         await _context.SaveChangesAsync();
 
+        await _cache.SetAsync($"url:{shortCode}", shortUrl.OriginalUrl, _cacheExpiration);
+
         _logger.LogInformation("Created short URL: {ShortCode} for {OriginalUrl}", shortCode, request.OriginalUrl);
 
         return new CreateUrlResponse
@@ -64,6 +69,37 @@ public class UrlService : IUrlService
 
     public async Task<string?> GetOriginalUrlAsync(string shortCode)
     {
+        var cacheKey = $"url:{shortCode}";
+        
+        var cachedUrl = await _cache.GetAsync<string>(cacheKey);
+        if (cachedUrl != null)
+        {
+            _logger.LogDebug("Cache hit for: {ShortCode}", shortCode);
+            
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var shortUrl = await _context.ShortUrls
+                        .FirstOrDefaultAsync(u => u.ShortCode == shortCode);
+                    if (shortUrl != null)
+                    {
+                        shortUrl.AccessCount++;
+                        shortUrl.LastAccessedAt = DateTime.UtcNow;
+                        await _context.SaveChangesAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error updating access count for: {ShortCode}", shortCode);
+                }
+            });
+            
+            return cachedUrl;
+        }
+
+        _logger.LogDebug("Cache miss for: {ShortCode}", shortCode);
+
         var shortUrl = await _context.ShortUrls
             .FirstOrDefaultAsync(u => u.ShortCode == shortCode);
 
@@ -81,6 +117,8 @@ public class UrlService : IUrlService
         shortUrl.AccessCount++;
         shortUrl.LastAccessedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        await _cache.SetAsync(cacheKey, shortUrl.OriginalUrl, _cacheExpiration);
 
         return shortUrl.OriginalUrl;
     }
