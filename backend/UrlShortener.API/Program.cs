@@ -17,10 +17,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-var connectionString = "Server=localhost,1433;Database=UrlShortenerDb;User Id=sa;Password=ZKY0B919_Fl1ck_Maga;TrustServerCertificate=True;Encrypt=False;";
-
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(connectionString));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var redisConnection = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
