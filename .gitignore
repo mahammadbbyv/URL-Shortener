@@ -32,6 +32,7 @@ obj/
 *.pidb
 *.svclog
 *.scc
+Migrations/
 
 # Visual Studio
 .vs/

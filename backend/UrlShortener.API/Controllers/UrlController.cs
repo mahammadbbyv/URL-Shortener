@@ -144,9 +144,21 @@ public class UrlController : ControllerBase
             {
                 ShortCode = shortCode,
                 TotalClicks = stats.AccessCount,
-                ClicksByDate = clicksByDate,
-                ClicksByBrowser = clicksByBrowser,
-                ClicksByDevice = clicksByDevice
+                ClicksByDate = clicksByDate.Select(kvp => new ClickByDate 
+                { 
+                    Date = kvp.Key, 
+                    Count = kvp.Value 
+                }).ToList(),
+                ClicksByBrowser = clicksByBrowser.Select(kvp => new ClickByBrowser 
+                { 
+                    Browser = kvp.Key, 
+                    Count = kvp.Value 
+                }).ToList(),
+                ClicksByDevice = clicksByDevice.Select(kvp => new ClickByDevice 
+                { 
+                    Device = kvp.Key, 
+                    Count = kvp.Value 
+                }).ToList()
             };
 
             return Ok(response);
