@@ -76,24 +76,16 @@ public class UrlService : IUrlService
         {
             _logger.LogDebug("Cache hit for: {ShortCode}", shortCode);
             
-            _ = Task.Run(async () =>
+            try
             {
-                try
-                {
-                    var shortUrl = await _context.ShortUrls
-                        .FirstOrDefaultAsync(u => u.ShortCode == shortCode);
-                    if (shortUrl != null)
-                    {
-                        shortUrl.AccessCount++;
-                        shortUrl.LastAccessedAt = DateTime.UtcNow;
-                        await _context.SaveChangesAsync();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error updating access count for: {ShortCode}", shortCode);
-                }
-            });
+                await _context.Database.ExecuteSqlRawAsync(
+                    "UPDATE ShortUrls SET AccessCount = AccessCount + 1, LastAccessedAt = {0} WHERE ShortCode = {1}",
+                    DateTime.UtcNow, shortCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating access count for: {ShortCode}", shortCode);
+            }
             
             return cachedUrl;
         }
