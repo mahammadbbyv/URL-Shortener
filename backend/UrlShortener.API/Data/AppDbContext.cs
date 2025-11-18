@@ -20,7 +20,7 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.ShortCode).IsUnique();
-            entity.Property(e => e.OriginalUrl).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.OriginalUrl).IsRequired();
             entity.Property(e => e.ShortCode).IsRequired().HasMaxLength(10);
             entity.Property(e => e.CreatedAt).IsRequired();
         });
