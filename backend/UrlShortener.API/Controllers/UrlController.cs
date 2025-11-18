@@ -9,11 +9,19 @@ namespace UrlShortener.API.Controllers;
 public class UrlController : ControllerBase
 {
     private readonly IUrlService _urlService;
+    private readonly IQrCodeService _qrCodeService;
+    private readonly IAnalyticsService _analyticsService;
     private readonly ILogger<UrlController> _logger;
 
-    public UrlController(IUrlService urlService, ILogger<UrlController> logger)
+    public UrlController(
+        IUrlService urlService, 
+        IQrCodeService qrCodeService,
+        IAnalyticsService analyticsService,
+        ILogger<UrlController> logger)
     {
         _urlService = urlService;
+        _qrCodeService = qrCodeService;
+        _analyticsService = analyticsService;
         _logger = logger;
     }
 
@@ -32,7 +40,7 @@ public class UrlController : ControllerBase
                 return BadRequest("Invalid URL format");
             }
 
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            var baseUrl = $"{Request.Scheme}://{Request.Host}/api/url";
             var response = await _urlService.CreateShortUrlAsync(request, baseUrl);
             
             return CreatedAtAction(nameof(GetStats), new { shortCode = response.ShortCode }, response);
@@ -53,7 +61,11 @@ public class UrlController : ControllerBase
     {
         try
         {
-            var originalUrl = await _urlService.GetOriginalUrlAsync(shortCode);
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+            var userAgent = Request.Headers["User-Agent"].ToString();
+            var referer = Request.Headers["Referer"].ToString();
+            
+            var originalUrl = await _urlService.GetOriginalUrlAsync(shortCode, ipAddress, userAgent, referer);
             
             if (originalUrl == null)
             {
@@ -86,6 +98,62 @@ public class UrlController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting stats for: {ShortCode}", shortCode);
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
+    [HttpGet("qr/{shortCode}")]
+    public async Task<IActionResult> GetQrCode(string shortCode, [FromQuery] int size = 10)
+    {
+        try
+        {
+            var shortUrl = await _urlService.GetUrlStatsAsync(shortCode);
+            if (shortUrl == null)
+            {
+                return NotFound("Short URL not found");
+            }
+
+            var fullUrl = $"{Request.Scheme}://{Request.Host}/api/url/{shortCode}";
+            var qrCode = _qrCodeService.GenerateQrCode(fullUrl, size);
+            
+            return File(qrCode, "image/png");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating QR code for: {ShortCode}", shortCode);
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
+    [HttpGet("analytics/{shortCode}")]
+    public async Task<ActionResult<AnalyticsResponse>> GetAnalytics(string shortCode, [FromQuery] int days = 30)
+    {
+        try
+        {
+            var stats = await _urlService.GetUrlStatsAsync(shortCode);
+            if (stats == null)
+            {
+                return NotFound("Short URL not found");
+            }
+
+            var clicksByDate = await _analyticsService.GetClicksByDateAsync(shortCode, days);
+            var clicksByBrowser = await _analyticsService.GetClicksByBrowserAsync(shortCode);
+            var clicksByDevice = await _analyticsService.GetClicksByDeviceAsync(shortCode);
+
+            var response = new AnalyticsResponse
+            {
+                ShortCode = shortCode,
+                TotalClicks = stats.AccessCount,
+                ClicksByDate = clicksByDate,
+                ClicksByBrowser = clicksByBrowser,
+                ClicksByDevice = clicksByDevice
+            };
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting analytics for: {ShortCode}", shortCode);
             return StatusCode(500, "Internal server error");
         }
     }

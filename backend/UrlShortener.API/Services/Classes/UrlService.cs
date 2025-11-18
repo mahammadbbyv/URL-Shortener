@@ -10,13 +10,15 @@ public class UrlService : IUrlService
 {
     private readonly AppDbContext _context;
     private readonly ICacheService _cache;
+    private readonly IAnalyticsService _analyticsService;
     private readonly ILogger<UrlService> _logger;
     private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(30);
 
-    public UrlService(AppDbContext context, ICacheService cache, ILogger<UrlService> logger)
+    public UrlService(AppDbContext context, ICacheService cache, IAnalyticsService analyticsService, ILogger<UrlService> logger)
     {
         _context = context;
         _cache = cache;
+        _analyticsService = analyticsService;
         _logger = logger;
     }
 
@@ -67,31 +69,10 @@ public class UrlService : IUrlService
         };
     }
 
-    public async Task<string?> GetOriginalUrlAsync(string shortCode)
+    public async Task<string?> GetOriginalUrlAsync(string shortCode, string? ipAddress = null, string? userAgent = null, string? referer = null)
     {
         var cacheKey = $"url:{shortCode}";
         
-        var cachedUrl = await _cache.GetAsync<string>(cacheKey);
-        if (cachedUrl != null)
-        {
-            _logger.LogDebug("Cache hit for: {ShortCode}", shortCode);
-            
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync(
-                    "UPDATE ShortUrls SET AccessCount = AccessCount + 1, LastAccessedAt = {0} WHERE ShortCode = {1}",
-                    DateTime.UtcNow, shortCode);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating access count for: {ShortCode}", shortCode);
-            }
-            
-            return cachedUrl;
-        }
-
-        _logger.LogDebug("Cache miss for: {ShortCode}", shortCode);
-
         var shortUrl = await _context.ShortUrls
             .FirstOrDefaultAsync(u => u.ShortCode == shortCode);
 
@@ -106,11 +87,29 @@ public class UrlService : IUrlService
             return null;
         }
 
-        shortUrl.AccessCount++;
-        shortUrl.LastAccessedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+        var cachedUrl = await _cache.GetAsync<string>(cacheKey);
+        if (cachedUrl != null)
+        {
+            _logger.LogDebug("Cache hit for: {ShortCode}", shortCode);
+        }
+        else
+        {
+            _logger.LogDebug("Cache miss for: {ShortCode}", shortCode);
+            await _cache.SetAsync(cacheKey, shortUrl.OriginalUrl, _cacheExpiration);
+        }
 
-        await _cache.SetAsync(cacheKey, shortUrl.OriginalUrl, _cacheExpiration);
+        try
+        {
+            await _context.Database.ExecuteSqlRawAsync(
+                "UPDATE ShortUrls SET AccessCount = AccessCount + 1, LastAccessedAt = {0} WHERE ShortCode = {1}",
+                DateTime.UtcNow, shortCode);
+            
+            await _analyticsService.TrackClickAsync(shortUrl, ipAddress, userAgent, referer);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating access count for: {ShortCode}", shortCode);
+        }
 
         return shortUrl.OriginalUrl;
     }
